@@ -1,9 +1,10 @@
 using System.Text;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
+using Yamgooo.SRI.Client.Contracts;
 using Yamgooo.SRI.Client.Models;
 
-namespace Yamgooo.SRI.Client
+namespace Yamgooo.SRI.Client.Services
 {
     public class SriClientService : ISriClientService
     {

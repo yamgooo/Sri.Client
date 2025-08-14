@@ -1,6 +1,6 @@
 using Yamgooo.SRI.Client.Models;
 
-namespace Yamgooo.SRI.Client
+namespace Yamgooo.SRI.Client.Contracts
 {
     /// <summary>
     /// Service interface for SRI (Servicio de Rentas Internas) operations

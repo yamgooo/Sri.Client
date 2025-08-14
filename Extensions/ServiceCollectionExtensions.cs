@@ -5,7 +5,9 @@
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Yamgooo.SRI.Client.Contracts;
 using Yamgooo.SRI.Client.Models;
+using Yamgooo.SRI.Client.Services;
 
 namespace Yamgooo.SRI.Client.Extensions;
 
@@ -58,6 +60,12 @@ public static class ServiceCollectionExtensions
         // Register the service
         services.AddScoped<ISriClientService, SriClientService>();
 
+        // Register additional SRI services
+        services.AddScoped<ICookieService, CookieService>();
+        services.AddScoped<ICaptchaService, CaptchaService>();
+        services.AddScoped<ICedulaService, CedulaService>();
+        services.AddScoped<IRucService, RucService>();
+
         return services;
     }
 
@@ -92,6 +100,12 @@ public static class ServiceCollectionExtensions
 
         // Register the service
         services.AddScoped<ISriClientService, SriClientService>();
+
+        // Register additional SRI services
+        services.AddScoped<ICookieService, CookieService>();
+        services.AddScoped<ICaptchaService, CaptchaService>();
+        services.AddScoped<ICedulaService, CedulaService>();
+        services.AddScoped<IRucService, RucService>();
 
         return services;
     }
@@ -140,6 +154,12 @@ public static class ServiceCollectionExtensions
         // Register the service with default configuration
         services.AddScoped<ISriClientService, SriClientService>();
 
+        // Register additional SRI services
+        services.AddScoped<ICookieService, CookieService>();
+        services.AddScoped<ICaptchaService, CaptchaService>();
+        services.AddScoped<ICedulaService, CedulaService>();
+        services.AddScoped<IRucService, RucService>();
+
         return services;
     }
 
@@ -174,6 +194,12 @@ public static class ServiceCollectionExtensions
                 services.AddScoped<ISriClientService, SriClientService>();
                 break;
         }
+
+        // Register additional SRI services
+        services.AddScoped<ICookieService, CookieService>();
+        services.AddScoped<ICaptchaService, CaptchaService>();
+        services.AddScoped<ICedulaService, CedulaService>();
+        services.AddScoped<IRucService, RucService>();
 
         return services;
     }

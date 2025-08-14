@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![NuGet](https://img.shields.io/badge/nuget-Yamgooo.SRI.Client-blue.svg)](https://www.nuget.org/packages/Yamgooo.SRI.Client)
 
-Una biblioteca profesional .NET para operaciones de cliente SRI (Servicio de Rentas Internas) en Ecuador. Este paquete proporciona integración perfecta con los servicios web del SRI para validación y autorización de documentos de facturación electrónica.
+Una biblioteca profesional .NET para operaciones de cliente SRI (Servicio de Rentas Internas) en Ecuador. Este paquete proporciona integración perfecta con los servicios web del SRI para validación y autorización de documentos de facturación electrónica, así como consulta de información de contribuyentes.
 
 También disponible en inglés: [README.md](README.md)
 
@@ -12,6 +12,8 @@ También disponible en inglés: [README.md](README.md)
 
 - **Validación de Documentos**: Envía documentos XML firmados al SRI para validación y recepción
 - **Solicitudes de Autorización**: Solicita autorización de documentos usando claves de acceso
+- **Consulta de Contribuyentes**: Obtiene información completa de contribuyentes por RUC o cédula
+- **Validación de Existencia**: Verifica automáticamente si los contribuyentes existen antes de obtener sus datos
 - **Soporte de Entornos**: Soporte para entornos de prueba y producción del SRI
 - **Operaciones Asíncronas**: Operaciones asíncronas de alto rendimiento
 - **Soporte de Configuración**: Múltiples opciones de configuración (appsettings.json, código, dinámica)
@@ -124,6 +126,32 @@ SriServiceConfiguration GetConfiguration();
 void UpdateConfiguration(SriServiceConfiguration configuration);
 ```
 
+### Interfaz IRucService
+
+#### Consulta de Contribuyente por RUC
+```csharp
+Task<ApiResult<ContribuyenteCompleteDto>> GetRucSriAsync(string ruc);
+```
+
+**Características:**
+- Valida automáticamente que el RUC tenga 13 dígitos numéricos
+- Verifica la existencia del contribuyente en el SRI antes de obtener datos
+- Retorna información completa del contribuyente incluyendo establecimientos
+- Manejo robusto de errores con códigos de estado específicos
+
+### Interfaz ICedulaService
+
+#### Consulta de Contribuyente por Cédula
+```csharp
+Task<ApiResult<ContribuyenteCedulaDto>> GetCedulaSriAsync(string cedula);
+```
+
+**Características:**
+- Valida automáticamente que la cédula tenga 10 dígitos numéricos
+- Verifica la existencia del contribuyente en el Registro Civil antes de obtener datos
+- Retorna información básica del contribuyente (identificación, nombre completo, fecha de defunción)
+- Manejo robusto de errores con códigos de estado específicos
+
 ### Modelos de Resultado
 
 #### SriValidationResult
@@ -144,6 +172,25 @@ public class SriAuthorizationResult : SriBaseResult
     public string Environment { get; set; }
     public string DocumentContent { get; set; }
     public int DocumentCount { get; set; }
+}
+```
+
+#### ContribuyenteCompleteDto
+```csharp
+public record ContribuyenteCompleteDto
+{
+    public required ContribuyenteRucDto Contribuyente { get; set; }
+    public required List<EstablecimientoDto> Establecimientos { get; set; }
+}
+```
+
+#### ContribuyenteCedulaDto
+```csharp
+public class ContribuyenteCedulaDto
+{
+    public string Identificacion { get; set; }
+    public string NombreCompleto { get; set; }
+    public string FechaDefuncion { get; set; }
 }
 ```
 
@@ -226,6 +273,183 @@ public class SriDocumentProcessor
 }
 ```
 
+### Ejemplo de Consulta de Contribuyente por RUC
+
+```csharp
+public class ContribuyenteService
+{
+    private readonly IRucService _rucService;
+    private readonly ILogger<ContribuyenteService> _logger;
+
+    public ContribuyenteService(IRucService rucService, ILogger<ContribuyenteService> logger)
+    {
+        _rucService = rucService;
+        _logger = logger;
+    }
+
+    public async Task<ApiResult<ContribuyenteCompleteDto>> ConsultarContribuyentePorRucAsync(string ruc)
+    {
+        try
+        {
+            _logger.LogInformation("Consultando contribuyente por RUC: {Ruc}", ruc);
+            
+            var result = await _rucService.GetRucSriAsync(ruc);
+            
+            if (result.IsSuccess)
+            {
+                _logger.LogInformation("Contribuyente encontrado: {Nombre}", result.Data.Contribuyente.RazonSocial);
+                _logger.LogInformation("Establecimientos encontrados: {Count}", result.Data.Establecimientos.Count);
+            }
+            else
+            {
+                _logger.LogWarning("No se encontró contribuyente con RUC: {Ruc}. Error: {Error}", 
+                    ruc, result.Message);
+            }
+            
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error consultando contribuyente por RUC: {Ruc}", ruc);
+            return new ApiResult<ContribuyenteCompleteDto>(
+                false,
+                ApiResultStatusCode.ServerError,
+                null,
+                $"Error inesperado: {ex.Message}"
+            );
+        }
+    }
+}
+```
+
+### Ejemplo de Consulta de Contribuyente por Cédula
+
+```csharp
+public class CedulaService
+{
+    private readonly ICedulaService _cedulaService;
+    private readonly ILogger<CedulaService> _logger;
+
+    public CedulaService(ICedulaService cedulaService, ILogger<CedulaService> logger)
+    {
+        _cedulaService = cedulaService;
+        _logger = logger;
+    }
+
+    public async Task<ApiResult<ContribuyenteCedulaDto>> ConsultarContribuyentePorCedulaAsync(string cedula)
+    {
+        try
+        {
+            _logger.LogInformation("Consultando contribuyente por cédula: {Cedula}", cedula);
+            
+            var result = await _cedulaService.GetCedulaSriAsync(cedula);
+            
+            if (result.IsSuccess)
+            {
+                _logger.LogInformation("Contribuyente encontrado: {Nombre}", result.Data.NombreCompleto);
+                
+                if (!string.IsNullOrEmpty(result.Data.FechaDefuncion))
+                {
+                    _logger.LogWarning("Contribuyente fallecido: {FechaDefuncion}", result.Data.FechaDefuncion);
+                }
+            }
+            else
+            {
+                _logger.LogWarning("No se encontró contribuyente con cédula: {Cedula}. Error: {Error}", 
+                    cedula, result.Message);
+            }
+            
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error consultando contribuyente por cédula: {Cedula}", cedula);
+            return new ApiResult<ContribuyenteCedulaDto>(
+                false,
+                ApiResultStatusCode.ServerError,
+                null,
+                $"Error inesperado: {ex.Message}"
+            );
+        }
+    }
+}
+```
+
+### Ejemplo de Uso Completo con Todos los Servicios
+
+```csharp
+public class SriIntegrationService
+{
+    private readonly ISriClientService _sriClient;
+    private readonly IRucService _rucService;
+    private readonly ICedulaService _cedulaService;
+    private readonly ILogger<SriIntegrationService> _logger;
+
+    public SriIntegrationService(
+        ISriClientService sriClient,
+        IRucService rucService,
+        ICedulaService cedulaService,
+        ILogger<SriIntegrationService> logger)
+    {
+        _sriClient = sriClient;
+        _rucService = rucService;
+        _cedulaService = cedulaService;
+        _logger = logger;
+    }
+
+    public async Task<IntegrationResult> ProcesarDocumentoCompletoAsync(
+        string signedXml, 
+        string rucEmisor, 
+        string cedulaReceptor)
+    {
+        try
+        {
+            // 1. Validar que el emisor existe
+            var emisorResult = await _rucService.GetRucSriAsync(rucEmisor);
+            if (!emisorResult.IsSuccess)
+            {
+                return IntegrationResult.CreateFailure($"Emisor no encontrado: {emisorResult.Message}");
+            }
+
+            // 2. Validar que el receptor existe (si es persona natural)
+            if (!string.IsNullOrEmpty(cedulaReceptor))
+            {
+                var receptorResult = await _cedulaService.GetCedulaSriAsync(cedulaReceptor);
+                if (!receptorResult.IsSuccess)
+                {
+                    return IntegrationResult.CreateFailure($"Receptor no encontrado: {receptorResult.Message}");
+                }
+            }
+
+            // 3. Procesar documento SRI
+            var validationResult = await _sriClient.ValidateDocumentAsync(signedXml);
+            if (!validationResult.Success)
+            {
+                return IntegrationResult.CreateFailure($"Validación fallida: {validationResult.ErrorMessage}");
+            }
+
+            var authResult = await _sriClient.RequestAuthorizationAsync(validationResult.AccessKey);
+            if (!authResult.Success)
+            {
+                return IntegrationResult.CreateFailure($"Autorización fallida: {authResult.ErrorMessage}");
+            }
+
+            return IntegrationResult.CreateSuccess(new
+            {
+                Emisor = emisorResult.Data,
+                Receptor = cedulaReceptor,
+                Autorizacion = authResult
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error en procesamiento completo");
+            return IntegrationResult.CreateFailure($"Error inesperado: {ex.Message}");
+        }
+    }
+}
+```
+
 ## 🔒 Consideraciones de Seguridad
 
 - **Solo HTTPS**: Siempre usa HTTPS para entornos de producción
@@ -303,3 +527,4 @@ Este proyecto está licenciado bajo la Licencia MIT - ver el archivo [LICENSE](L
 ---
 
 **Hecho con ❤️ para la comunidad de desarrolladores ecuatorianos**
+
