@@ -10,7 +10,6 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Web;
 using Microsoft.Extensions.Logging;
-using Yamgooo.SRI.Client.Common;
 using Yamgooo.SRI.Client.Contracts;
 using Yamgooo.SRI.Client.Models;
 
@@ -40,88 +39,37 @@ namespace Yamgooo.SRI.Client.Services
         /// <summary>
         /// Retrieves contributor information from SRI using their RUC number
         /// </summary>
-        public async Task<ApiResult<ContribuyenteCompleteDto>> GetRucSriAsync(string ruc)
+        public async Task<ContribuyenteCompleteDto> GetRucSriAsync(string ruc)
         {
             var requestId = Guid.NewGuid().ToString();
             _logger.LogInformation("Starting RUC lookup. RequestId: {RequestId}, RUC: {Ruc}", requestId, ruc);
 
-            try
+            var validationResult = ValidateRucInput(ruc);
+            if (!validationResult)
             {
-                var validationResult = ValidateRucInput(ruc);
-                if (!validationResult.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.BadRequest,
-                        null,
-                        validationResult.Message
-                    );
-                }
-
-                var existenceCheck = await CheckExistenceAsync(ruc, requestId);
-                if (!existenceCheck.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.NotFound,
-                        null,
-                        existenceCheck.Message
-                    );
-                }
-
-                // Get cookies and captcha
-                ApiResult<CookieResponse> cookieResult = await _cookieService.GetAsync();
-                if (!cookieResult.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.ServerError,
-                        null,
-                        $"Failed to obtain cookies: {cookieResult.Message}"
-                    );
-                }
-
-                var captchaResult = await _captchaService.ValidateAsync(
-                    cookieResult.Data.Captcha, 
-                    cookieResult.Data.Cookie
-                );
-
-                if (!captchaResult.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.BadRequest,
-                        null,
-                        $"Failed to validate captcha: {captchaResult.Message}"
-                    );
-                }
-
-                var contributorData = await GetContributorDataAsync(
-                    ruc, 
-                    cookieResult.Data.Cookie, 
-                    captchaResult.Data, 
-                    requestId
-                );
-
-                if (contributorData.IsSuccess)
-                {
-                    _logger.LogInformation("RUC lookup successful. RequestId: {RequestId}, RUC: {Ruc}", 
-                        requestId, ruc);
-                }
-
-                return contributorData;
+                throw new ArgumentException("RUC validation failed");
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error during RUC lookup. RequestId: {RequestId}, RUC: {Ruc}", 
-                    requestId, ruc);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Unexpected error: {ex.Message}"
-                );
-            }
+
+            await CheckExistenceAsync(ruc, requestId);
+
+            // Get cookies and captcha
+            var cookieResult = await _cookieService.GetAsync();
+            var captchaResult = await _captchaService.ValidateAsync(
+                cookieResult.Captcha, 
+                cookieResult.Cookie
+            );
+
+            var contributorData = await GetContributorDataAsync(
+                ruc, 
+                cookieResult.Cookie, 
+                captchaResult, 
+                requestId
+            );
+
+            _logger.LogInformation("RUC lookup successful. RequestId: {RequestId}, RUC: {Ruc}", 
+                requestId, ruc);
+
+            return contributorData;
         }
 
         #region Private Methods
@@ -134,42 +82,27 @@ namespace Yamgooo.SRI.Client.Services
                 "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:67.0) Gecko/20100101 Firefox/67.0");
         }
 
-        private ApiResult<bool> ValidateRucInput(string ruc)
+        private bool ValidateRucInput(string ruc)
         {
             if (string.IsNullOrWhiteSpace(ruc))
             {
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.BadRequest,
-                    false,
-                    "RUC es requerido"
-                );
+                throw new ArgumentException("RUC es requerido", nameof(ruc));
             }
 
             if (ruc.Length != 13)
             {
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.BadRequest,
-                    false,
-                    "RUC debe tener 13 dígitos"
-                );
+                throw new ArgumentException("RUC debe tener 13 dígitos", nameof(ruc));
             }
 
             if (!ruc.All(char.IsDigit))
             {
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.BadRequest,
-                    false,
-                    "RUC debe contener solo números"
-                );
+                throw new ArgumentException("RUC debe contener solo números", nameof(ruc));
             }
 
-            return new ApiResult<bool>(true, ApiResultStatusCode.Success, true);
+            return true;
         }
 
-        private async Task<ApiResult<bool>> CheckExistenceAsync(string ruc, string requestId)
+        private async Task CheckExistenceAsync(string ruc, string requestId)
         {
             try
             {
@@ -199,12 +132,7 @@ namespace Yamgooo.SRI.Client.Services
                     _logger.LogWarning("RUC existence check failed. Status: {StatusCode}, RequestId: {RequestId}", 
                         response.StatusCode, requestId);
                     
-                    return new ApiResult<bool>(
-                        false,
-                        ApiResultStatusCode.ServerError,
-                        false,
-                        "No se pudo consultar la existencia del RUC"
-                    );
+                    throw new HttpRequestException("No se pudo consultar la existencia del RUC");
                 }
 
                 var stream = await response.Content.ReadAsStreamAsync();
@@ -215,51 +143,34 @@ namespace Yamgooo.SRI.Client.Services
                 {
                     _logger.LogDebug("RUC exists. RequestId: {RequestId}, RUC: {Ruc}", 
                         requestId, ruc);
-                    return new ApiResult<bool>(true, ApiResultStatusCode.Success, true);
+                    return;
                 }
 
                 _logger.LogWarning("RUC not found. RequestId: {RequestId}, RUC: {Ruc}", 
                     requestId, ruc);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.NotFound,
-                    false,
-                    "No existe contribuyente con ese RUC"
-                );
+                throw new KeyNotFoundException("No existe contribuyente con ese RUC");
             }
-            catch (HttpRequestException ex)
+            catch (HttpRequestException)
             {
-                _logger.LogError(ex, "HTTP error during RUC existence check. RequestId: {RequestId}", requestId);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    false,
-                    $"HTTP error: {ex.Message}"
-                );
+                throw;
+            }
+            catch (KeyNotFoundException)
+            {
+                throw;
             }
             catch (TaskCanceledException)
             {
                 _logger.LogWarning("Request timeout during RUC existence check. RequestId: {RequestId}", requestId);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    false,
-                    "Request timeout while checking RUC existence"
-                );
+                throw new TimeoutException("Request timeout while checking RUC existence");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during RUC existence check. RequestId: {RequestId}", requestId);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    false,
-                    $"Unexpected error: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Unexpected error during RUC existence check: {ex.Message}", ex);
             }
         }
 
-        private async Task<ApiResult<ContribuyenteCompleteDto>> GetContributorDataAsync(
+        private async Task<ContribuyenteCompleteDto> GetContributorDataAsync(
             string ruc, 
             CookieContainer cookies, 
             string captcha, 
@@ -275,12 +186,7 @@ namespace Yamgooo.SRI.Client.Services
                 var captchaDeserialized = JsonSerializer.Deserialize<TokenSri>(captcha, jsonSettings);
                 if (captchaDeserialized == null || string.IsNullOrWhiteSpace(captchaDeserialized.Mensaje))
                 {
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.BadRequest,
-                        null,
-                        "Invalid captcha token format"
-                    );
+                    throw new ArgumentException("Invalid captcha token format", nameof(captcha));
                 }
 
                 var tokenSri = captchaDeserialized.Mensaje;
@@ -315,12 +221,7 @@ namespace Yamgooo.SRI.Client.Services
                     _logger.LogWarning("Contributor data request failed. Status: {StatusCode}, RequestId: {RequestId}", 
                         response.StatusCode, requestId);
                     
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.ServerError,
-                        null,
-                        $"Failed to retrieve contributor data. Status: {(int)response.StatusCode} {response.ReasonPhrase}"
-                    );
+                    throw new HttpRequestException($"Failed to retrieve contributor data. Status: {(int)response.StatusCode} {response.ReasonPhrase}");
                 }
 
                 var stream = await response.Content.ReadAsStreamAsync();
@@ -332,12 +233,7 @@ namespace Yamgooo.SRI.Client.Services
                 {
                     _logger.LogWarning("No contributor data found. RequestId: {RequestId}, RUC: {Ruc}", 
                         requestId, ruc);
-                    return new ApiResult<ContribuyenteCompleteDto>(
-                        false,
-                        ApiResultStatusCode.NotFound,
-                        null,
-                        "No existe contribuyente con ese RUC"
-                    );
+                    throw new KeyNotFoundException("No existe contribuyente con ese RUC");
                 }
 
                 var consolidatedRuc = await GetRucWithEstablishmentsAsync(rucs[0], cookies, tokenSri, requestId);
@@ -346,46 +242,29 @@ namespace Yamgooo.SRI.Client.Services
             catch (JsonException ex)
             {
                 _logger.LogError(ex, "JSON parsing error during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Failed to parse contributor data: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Failed to parse contributor data: {ex.Message}", ex);
             }
-            catch (HttpRequestException ex)
+            catch (HttpRequestException)
             {
-                _logger.LogError(ex, "HTTP error during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"HTTP error: {ex.Message}"
-                );
+                throw;
+            }
+            catch (KeyNotFoundException)
+            {
+                throw;
             }
             catch (TaskCanceledException)
             {
                 _logger.LogWarning("Request timeout during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    "Request timeout while retrieving contributor data"
-                );
+                throw new TimeoutException("Request timeout while retrieving contributor data");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Unexpected error: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Unexpected error during contributor data retrieval: {ex.Message}", ex);
             }
         }
 
-        private async Task<ApiResult<ContribuyenteCompleteDto>> GetRucWithEstablishmentsAsync(
+        private async Task<ContribuyenteCompleteDto> GetRucWithEstablishmentsAsync(
             ContribuyenteRucDto contribuyenteRucDto,
             CookieContainer cookieContainer,
             string tokenSri,
@@ -458,51 +337,27 @@ namespace Yamgooo.SRI.Client.Services
                 _logger.LogDebug("Contributor data with establishments retrieved successfully. RequestId: {RequestId}, RUC: {Ruc}", 
                     requestId, contribuyenteRucDto.NumeroRuc);
 
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    true,
-                    ApiResultStatusCode.Success,
-                    result
-                );
+                return result;
             }
             catch (JsonException ex)
             {
                 _logger.LogError(ex, "JSON parsing error during establishments retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Failed to parse establishments data: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Failed to parse establishments data: {ex.Message}", ex);
             }
             catch (HttpRequestException ex)
             {
                 _logger.LogError(ex, "HTTP error during establishments retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"HTTP error: {ex.Message}"
-                );
+                throw new HttpRequestException($"HTTP error during establishments retrieval: {ex.Message}", ex);
             }
             catch (TaskCanceledException)
             {
                 _logger.LogWarning("Request timeout during establishments retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    "Request timeout while retrieving establishments data"
-                );
+                throw new TimeoutException("Request timeout while retrieving establishments data");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during establishments retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCompleteDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Unexpected error: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Unexpected error during establishments retrieval: {ex.Message}", ex);
             }
         }
 

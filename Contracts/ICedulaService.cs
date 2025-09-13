@@ -3,7 +3,6 @@
 // Date: 2025-08-13
 // -------------------------------------------------------------
 
-using Yamgooo.SRI.Client.Common;
 using Yamgooo.SRI.Client.Models;
 
 namespace Yamgooo.SRI.Client.Contracts
@@ -15,9 +14,8 @@ namespace Yamgooo.SRI.Client.Contracts
         /// </summary>
         /// <param name="cedula">The cedula number to search for</param>
         /// <returns>
-        /// An <see cref="ApiResult"/> containing the contributor data if successful,
-        /// or an error message and status code if it fails.
+        /// The contributor data if successful, or throws an exception if it fails.
         /// </returns>
-        Task<ApiResult<ContribuyenteCedulaDto>> GetCedulaSriAsync(string cedula);
+        Task<ContribuyenteCedulaDto> GetCedulaSriAsync(string cedula);
     }
 }

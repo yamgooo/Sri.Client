@@ -130,27 +130,27 @@ void UpdateConfiguration(SriServiceConfiguration configuration);
 
 #### Consulta de Contribuyente por RUC
 ```csharp
-Task<ApiResult<ContribuyenteCompleteDto>> GetRucSriAsync(string ruc);
+Task<ContribuyenteCompleteDto> GetRucSriAsync(string ruc);
 ```
 
 **Características:**
 - Valida automáticamente que el RUC tenga 13 dígitos numéricos
 - Verifica la existencia del contribuyente en el SRI antes de obtener datos
 - Retorna información completa del contribuyente incluyendo establecimientos
-- Manejo robusto de errores con códigos de estado específicos
+- Lanza excepciones apropiadas en caso de error
 
 ### Interfaz ICedulaService
 
 #### Consulta de Contribuyente por Cédula
 ```csharp
-Task<ApiResult<ContribuyenteCedulaDto>> GetCedulaSriAsync(string cedula);
+Task<ContribuyenteCedulaDto> GetCedulaSriAsync(string cedula);
 ```
 
 **Características:**
 - Valida automáticamente que la cédula tenga 10 dígitos numéricos
 - Verifica la existencia del contribuyente en el Registro Civil antes de obtener datos
 - Retorna información básica del contribuyente (identificación, nombre completo, fecha de defunción)
-- Manejo robusto de errores con códigos de estado específicos
+- Lanza excepciones apropiadas en caso de error
 
 ### Modelos de Resultado
 
@@ -287,7 +287,7 @@ public class ContribuyenteService
         _logger = logger;
     }
 
-    public async Task<ApiResult<ContribuyenteCompleteDto>> ConsultarContribuyentePorRucAsync(string ruc)
+    public async Task<ContribuyenteCompleteDto> ConsultarContribuyentePorRucAsync(string ruc)
     {
         try
         {
@@ -295,28 +295,15 @@ public class ContribuyenteService
             
             var result = await _rucService.GetRucSriAsync(ruc);
             
-            if (result.IsSuccess)
-            {
-                _logger.LogInformation("Contribuyente encontrado: {Nombre}", result.Data.Contribuyente.RazonSocial);
-                _logger.LogInformation("Establecimientos encontrados: {Count}", result.Data.Establecimientos.Count);
-            }
-            else
-            {
-                _logger.LogWarning("No se encontró contribuyente con RUC: {Ruc}. Error: {Error}", 
-                    ruc, result.Message);
-            }
+            _logger.LogInformation("Contribuyente encontrado: {Nombre}", result.Contribuyente.RazonSocial);
+            _logger.LogInformation("Establecimientos encontrados: {Count}", result.Establecimientos.Count);
             
             return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error consultando contribuyente por RUC: {Ruc}", ruc);
-            return new ApiResult<ContribuyenteCompleteDto>(
-                false,
-                ApiResultStatusCode.ServerError,
-                null,
-                $"Error inesperado: {ex.Message}"
-            );
+            throw;
         }
     }
 }
@@ -336,7 +323,7 @@ public class CedulaService
         _logger = logger;
     }
 
-    public async Task<ApiResult<ContribuyenteCedulaDto>> ConsultarContribuyentePorCedulaAsync(string cedula)
+    public async Task<ContribuyenteCedulaDto> ConsultarContribuyentePorCedulaAsync(string cedula)
     {
         try
         {
@@ -344,19 +331,11 @@ public class CedulaService
             
             var result = await _cedulaService.GetCedulaSriAsync(cedula);
             
-            if (result.IsSuccess)
+            _logger.LogInformation("Contribuyente encontrado: {Nombre}", result.NombreCompleto);
+            
+            if (!string.IsNullOrEmpty(result.FechaDefuncion))
             {
-                _logger.LogInformation("Contribuyente encontrado: {Nombre}", result.Data.NombreCompleto);
-                
-                if (!string.IsNullOrEmpty(result.Data.FechaDefuncion))
-                {
-                    _logger.LogWarning("Contribuyente fallecido: {FechaDefuncion}", result.Data.FechaDefuncion);
-                }
-            }
-            else
-            {
-                _logger.LogWarning("No se encontró contribuyente con cédula: {Cedula}. Error: {Error}", 
-                    cedula, result.Message);
+                _logger.LogWarning("Contribuyente fallecido: {FechaDefuncion}", result.FechaDefuncion);
             }
             
             return result;
@@ -364,12 +343,7 @@ public class CedulaService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error consultando contribuyente por cédula: {Cedula}", cedula);
-            return new ApiResult<ContribuyenteCedulaDto>(
-                false,
-                ApiResultStatusCode.ServerError,
-                null,
-                $"Error inesperado: {ex.Message}"
-            );
+            throw;
         }
     }
 }

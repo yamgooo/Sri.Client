@@ -130,27 +130,27 @@ void UpdateConfiguration(SriServiceConfiguration configuration);
 
 #### Contributor Query by RUC
 ```csharp
-Task<ApiResult<ContribuyenteCompleteDto>> GetRucSriAsync(string ruc);
+Task<ContribuyenteCompleteDto> GetRucSriAsync(string ruc);
 ```
 
 **Features:**
 - Automatically validates that RUC has 13 numeric digits
 - Verifies contributor existence in SRI before retrieving data
 - Returns complete contributor information including establishments
-- Robust error handling with specific status codes
+- Throws appropriate exceptions in case of error
 
 ### ICedulaService Interface
 
 #### Contributor Query by Cedula
 ```csharp
-Task<ApiResult<ContribuyenteCedulaDto>> GetCedulaSriAsync(string cedula);
+Task<ContribuyenteCedulaDto> GetCedulaSriAsync(string cedula);
 ```
 
 **Features:**
 - Automatically validates that cedula has 10 numeric digits
 - Verifies contributor existence in Civil Registry before retrieving data
 - Returns basic contributor information (identification, full name, death date)
-- Robust error handling with specific status codes
+- Throws appropriate exceptions in case of error
 
 ### Result Models
 
@@ -287,7 +287,7 @@ public class ContributorService
         _logger = logger;
     }
 
-    public async Task<ApiResult<ContribuyenteCompleteDto>> QueryContributorByRucAsync(string ruc)
+    public async Task<ContribuyenteCompleteDto> QueryContributorByRucAsync(string ruc)
     {
         try
         {
@@ -295,28 +295,15 @@ public class ContributorService
             
             var result = await _rucService.GetRucSriAsync(ruc);
             
-            if (result.IsSuccess)
-            {
-                _logger.LogInformation("Contributor found: {Name}", result.Data.Contribuyente.RazonSocial);
-                _logger.LogInformation("Establishments found: {Count}", result.Data.Establecimientos.Count);
-            }
-            else
-            {
-                _logger.LogWarning("No contributor found with RUC: {Ruc}. Error: {Error}", 
-                    ruc, result.Message);
-            }
+            _logger.LogInformation("Contributor found: {Name}", result.Contribuyente.RazonSocial);
+            _logger.LogInformation("Establishments found: {Count}", result.Establecimientos.Count);
             
             return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying contributor by RUC: {Ruc}", ruc);
-            return new ApiResult<ContribuyenteCompleteDto>(
-                false,
-                ApiResultStatusCode.ServerError,
-                null,
-                $"Unexpected error: {ex.Message}"
-            );
+            throw;
         }
     }
 }
@@ -336,7 +323,7 @@ public class CedulaService
         _logger = logger;
     }
 
-    public async Task<ApiResult<ContribuyenteCedulaDto>> QueryContributorByCedulaAsync(string cedula)
+    public async Task<ContribuyenteCedulaDto> QueryContributorByCedulaAsync(string cedula)
     {
         try
         {
@@ -344,19 +331,11 @@ public class CedulaService
             
             var result = await _cedulaService.GetCedulaSriAsync(cedula);
             
-            if (result.IsSuccess)
+            _logger.LogInformation("Contributor found: {Name}", result.NombreCompleto);
+            
+            if (!string.IsNullOrEmpty(result.FechaDefuncion))
             {
-                _logger.LogInformation("Contributor found: {Name}", result.Data.NombreCompleto);
-                
-                if (!string.IsNullOrEmpty(result.Data.FechaDefuncion))
-                {
-                    _logger.LogWarning("Contributor deceased: {DeathDate}", result.Data.FechaDefuncion);
-                }
-            }
-            else
-            {
-                _logger.LogWarning("No contributor found with cedula: {Cedula}. Error: {Error}", 
-                    cedula, result.Message);
+                _logger.LogWarning("Contributor deceased: {DeathDate}", result.FechaDefuncion);
             }
             
             return result;
@@ -364,12 +343,7 @@ public class CedulaService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying contributor by cedula: {Cedula}", cedula);
-            return new ApiResult<ContribuyenteCedulaDto>(
-                false,
-                ApiResultStatusCode.ServerError,
-                null,
-                $"Unexpected error: {ex.Message}"
-            );
+            throw;
         }
     }
 }

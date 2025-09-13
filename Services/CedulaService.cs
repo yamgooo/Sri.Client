@@ -10,7 +10,6 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Web;
 using Microsoft.Extensions.Logging;
-using Yamgooo.SRI.Client.Common;
 using Yamgooo.SRI.Client.Contracts;
 using Yamgooo.SRI.Client.Models;
 
@@ -40,90 +39,35 @@ namespace Yamgooo.SRI.Client.Services
         /// <summary>
         /// Retrieves contributor information from SRI using their cedula number
         /// </summary>
-        public async Task<ApiResult<ContribuyenteCedulaDto>> GetCedulaSriAsync(string cedula)
+        public async Task<ContribuyenteCedulaDto> GetCedulaSriAsync(string cedula)
         {
             var requestId = Guid.NewGuid().ToString();
             _logger.LogInformation("Starting cedula lookup. RequestId: {RequestId}, Cedula: {Cedula}", requestId, cedula);
 
-            try
-            {
-                // Validate cedula input
-                var validationResult = ValidateCedulaInput(cedula);
-                if (!validationResult.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        false,
-                        ApiResultStatusCode.BadRequest,
-                        null,
-                        validationResult.Message
-                    );
-                }
+            // Validate cedula input
+            ValidateCedulaInput(cedula);
 
-                // Check if cedula exists
-                var existenceCheck = await CheckExistenceAsync(cedula, requestId);
-                if (!existenceCheck.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        false,
-                        ApiResultStatusCode.NotFound,
-                        null,
-                        existenceCheck.Message
-                    );
-                }
+            // Check if cedula exists
+            await CheckExistenceAsync(cedula, requestId);
 
-                // Get cookies and captcha
-                ApiResult<CookieResponse> cookieResult = await _cookieService.GetAsync();
-                if (!cookieResult.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        false,
-                        ApiResultStatusCode.ServerError,
-                        null,
-                        $"Failed to obtain cookies: {cookieResult.Message}"
-                    );
-                }
+            // Get cookies and captcha
+            var cookieResult = await _cookieService.GetAsync();
+            var captchaResult = await _captchaService.ValidateAsync(
+                cookieResult.Captcha, 
+                cookieResult.Cookie
+            );
 
-                var captchaResult = await _captchaService.ValidateAsync(
-                    cookieResult.Data.Captcha, 
-                    cookieResult.Data.Cookie
-                );
+            var contributorData = await GetContributorDataAsync(
+                cedula, 
+                cookieResult.Cookie, 
+                captchaResult, 
+                requestId
+            );
 
-                if (!captchaResult.IsSuccess)
-                {
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        false,
-                        ApiResultStatusCode.BadRequest,
-                        null,
-                        $"Failed to validate captcha: {captchaResult.Message}"
-                    );
-                }
+            _logger.LogInformation("Cedula lookup successful. RequestId: {RequestId}, Cedula: {Cedula}", 
+                requestId, cedula);
 
-                var contributorData = await GetContributorDataAsync(
-                    cedula, 
-                    cookieResult.Data.Cookie, 
-                    captchaResult.Data, 
-                    requestId
-                );
-
-                if (contributorData.IsSuccess)
-                {
-                    _logger.LogInformation("Cedula lookup successful. RequestId: {RequestId}, Cedula: {Cedula}", 
-                        requestId, cedula);
-                }
-
-                return contributorData;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error during cedula lookup. RequestId: {RequestId}, Cedula: {Cedula}", 
-                    requestId, cedula);
-                return new ApiResult<ContribuyenteCedulaDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Unexpected error: {ex.Message}"
-                );
-            }
+            return contributorData;
         }
 
         #region Private Methods
@@ -136,42 +80,25 @@ namespace Yamgooo.SRI.Client.Services
                 "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:67.0) Gecko/20100101 Firefox/67.0");
         }
 
-        private ApiResult<bool> ValidateCedulaInput(string cedula)
+        private void ValidateCedulaInput(string cedula)
         {
             if (string.IsNullOrWhiteSpace(cedula))
             {
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.BadRequest,
-                    false,
-                    "Cédula es requerido"
-                );
+                throw new ArgumentException("Cédula es requerido", nameof(cedula));
             }
 
             if (cedula.Length != 10)
             {
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.BadRequest,
-                    false,
-                    "Cédula debe tener 10 dígitos"
-                );
+                throw new ArgumentException("Cédula debe tener 10 dígitos", nameof(cedula));
             }
 
             if (!cedula.All(char.IsDigit))
             {
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.BadRequest,
-                    false,
-                    "Cédula debe contener solo números"
-                );
+                throw new ArgumentException("Cédula debe contener solo números", nameof(cedula));
             }
-
-            return new ApiResult<bool>(true, ApiResultStatusCode.Success, true);
         }
 
-        private async Task<ApiResult<bool>> CheckExistenceAsync(string cedula, string requestId)
+        private async Task CheckExistenceAsync(string cedula, string requestId)
         {
             try
             {
@@ -201,12 +128,7 @@ namespace Yamgooo.SRI.Client.Services
                     _logger.LogWarning("Cedula existence check failed. Status: {StatusCode}, RequestId: {RequestId}", 
                         response.StatusCode, requestId);
                     
-                    return new ApiResult<bool>(
-                        false,
-                        ApiResultStatusCode.ServerError,
-                        false,
-                        "No se pudo consultar la existencia de la cédula"
-                    );
+                    throw new HttpRequestException("No se pudo consultar la existencia de la cédula");
                 }
 
                 var stream = await response.Content.ReadAsStreamAsync();
@@ -217,51 +139,34 @@ namespace Yamgooo.SRI.Client.Services
                 {
                     _logger.LogDebug("Cedula exists. RequestId: {RequestId}, Cedula: {Cedula}", 
                         requestId, cedula);
-                    return new ApiResult<bool>(true, ApiResultStatusCode.Success, true);
+                    return;
                 }
 
                 _logger.LogWarning("Cedula not found. RequestId: {RequestId}, Cedula: {Cedula}", 
                     requestId, cedula);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.NotFound,
-                    false,
-                    "No existe contribuyente con esa cédula"
-                );
+                throw new KeyNotFoundException("No existe contribuyente con esa cédula");
             }
-            catch (HttpRequestException ex)
+            catch (HttpRequestException)
             {
-                _logger.LogError(ex, "HTTP error during cedula existence check. RequestId: {RequestId}", requestId);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    false,
-                    $"HTTP error: {ex.Message}"
-                );
+                throw;
+            }
+            catch (KeyNotFoundException)
+            {
+                throw;
             }
             catch (TaskCanceledException)
             {
                 _logger.LogWarning("Request timeout during cedula existence check. RequestId: {RequestId}", requestId);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    false,
-                    "Request timeout while checking cedula existence"
-                );
+                throw new TimeoutException("Request timeout while checking cedula existence");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during cedula existence check. RequestId: {RequestId}", requestId);
-                return new ApiResult<bool>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    false,
-                    $"Unexpected error: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Unexpected error during cedula existence check: {ex.Message}", ex);
             }
         }
 
-        private async Task<ApiResult<ContribuyenteCedulaDto>> GetContributorDataAsync(
+        private async Task<ContribuyenteCedulaDto> GetContributorDataAsync(
             string cedula, 
             CookieContainer cookies, 
             string captcha, 
@@ -277,12 +182,7 @@ namespace Yamgooo.SRI.Client.Services
                 var captchaDeserialized = JsonSerializer.Deserialize<TokenSri>(captcha, jsonSettings);
                 if (captchaDeserialized == null || string.IsNullOrWhiteSpace(captchaDeserialized.Mensaje))
                 {
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        false,
-                        ApiResultStatusCode.BadRequest,
-                        null,
-                        "Invalid captcha token format"
-                    );
+                    throw new ArgumentException("Invalid captcha token format", nameof(captcha));
                 }
 
                 var tokenSri = captchaDeserialized.Mensaje;
@@ -317,12 +217,7 @@ namespace Yamgooo.SRI.Client.Services
                     _logger.LogWarning("Contributor data request failed. Status: {StatusCode}, RequestId: {RequestId}", 
                         response.StatusCode, requestId);
                     
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        false,
-                        ApiResultStatusCode.ServerError,
-                        null,
-                        $"Failed to retrieve contributor data. Status: {(int)response.StatusCode} {response.ReasonPhrase}"
-                    );
+                    throw new HttpRequestException($"Failed to retrieve contributor data. Status: {(int)response.StatusCode} {response.ReasonPhrase}");
                 }
 
                 var stream = await response.Content.ReadAsStreamAsync();
@@ -337,61 +232,35 @@ namespace Yamgooo.SRI.Client.Services
                 {
                     _logger.LogDebug("Contributor data retrieved successfully. RequestId: {RequestId}, Cedula: {Cedula}", 
                         requestId, cedula);
-                    return new ApiResult<ContribuyenteCedulaDto>(
-                        true,
-                        ApiResultStatusCode.Success,
-                        result
-                    );
+                    return result;
                 }
 
                 _logger.LogWarning("No contributor data found. RequestId: {RequestId}, Cedula: {Cedula}", 
                     requestId, cedula);
-                return new ApiResult<ContribuyenteCedulaDto>(
-                    false,
-                    ApiResultStatusCode.NotFound,
-                    null,
-                    "No existe contribuyente con esa cédula"
-                );
+                throw new KeyNotFoundException("No existe contribuyente con esa cédula");
             }
             catch (JsonException ex)
             {
                 _logger.LogError(ex, "JSON parsing error during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCedulaDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Failed to parse contributor data: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Failed to parse contributor data: {ex.Message}", ex);
             }
-            catch (HttpRequestException ex)
+            catch (HttpRequestException)
             {
-                _logger.LogError(ex, "HTTP error during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCedulaDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"HTTP error: {ex.Message}"
-                );
+                throw;
+            }
+            catch (KeyNotFoundException)
+            {
+                throw;
             }
             catch (TaskCanceledException)
             {
                 _logger.LogWarning("Request timeout during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCedulaDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    "Request timeout while retrieving contributor data"
-                );
+                throw new TimeoutException("Request timeout while retrieving contributor data");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during contributor data retrieval. RequestId: {RequestId}", requestId);
-                return new ApiResult<ContribuyenteCedulaDto>(
-                    false,
-                    ApiResultStatusCode.ServerError,
-                    null,
-                    $"Unexpected error: {ex.Message}"
-                );
+                throw new InvalidOperationException($"Unexpected error during contributor data retrieval: {ex.Message}", ex);
             }
         }
 

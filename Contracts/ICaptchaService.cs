@@ -4,7 +4,6 @@
 // -------------------------------------------------------------
 
 using System.Net;
-using Yamgooo.SRI.Client.Common;
 
 namespace Yamgooo.SRI.Client.Contracts
 {
@@ -16,9 +15,8 @@ namespace Yamgooo.SRI.Client.Contracts
         /// <param name="captcha">The captcha data in JSON format</param>
         /// <param name="cookies">The cookie container for the SRI session</param>
         /// <returns>
-        /// An <see cref="ApiResult"/> containing the validation token if successful,
-        /// or an error message and status code if it fails.
+        /// The validation token if successful, or throws an exception if it fails.
         /// </returns>
-        Task<ApiResult<string>> ValidateAsync(string captcha, CookieContainer cookies);
+        Task<string> ValidateAsync(string captcha, CookieContainer cookies);
     }
 }
